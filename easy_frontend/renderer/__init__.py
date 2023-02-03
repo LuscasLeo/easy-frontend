@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 
 class Element(ABC):
     def __init__(
         self,
-        children: List["Element"] = [],
+        children: Sequence["Element"] = [],
         attributes: Dict[str, str] = {},
     ) -> None:
         self.children = children
@@ -98,7 +98,7 @@ class CustomElement(Element):
     def __init__(
         self,
         tag_name: str,
-        children: List[Element] = [],
+        children: Sequence[Element] = [],
         attributes: Dict[str, str] = {},
     ) -> None:
         super().__init__(children, attributes)

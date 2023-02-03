@@ -1,12 +1,12 @@
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Callable, Dict, Generic, List, Sequence, TypeVar, Union
 
 from flask import Flask, make_response, request
 
 from easy_frontend.actions import ActionsManager
-from easy_frontend.renderer import CE, Button, Script, Span, Text, View
+from easy_frontend.renderer import CE, Button, Element, Script, Span, Text, View
 
 
 class AdoptableStatus(Enum):
@@ -35,24 +35,6 @@ adoptables = {
 def render_adoptables_table() -> View:
     return View(
         children=[
-            Script(
-                """
-function execute_function(action_name, args) {
-    fetch("/", {
-        method: "POST",
-        body: JSON.stringify({action_name, args}),
-        headers: {
-            "Content-Type": "application/json"
-        }
-    }).then(function(response) {
-        return response.json();
-    }).then(function(data) {
-        console.log(data);
-        window.location.reload();
-    });
-}
-            """
-            ),
             CE(
                 "table",
                 [
@@ -133,11 +115,127 @@ def cancel_adoption(id: int) -> Any:
     adoptable.adoption_status = AdoptableStatus.AVAILABLE
 
 
-action_manager = ActionsManager(
-    {
-        "adopt": adopt,
-        "cancel_adoption": cancel_adoption,
-    }
+@dataclass
+class Column:
+    name: str
+    label: str
+
+
+T = TypeVar("T")
+IDENTITIFIER = TypeVar("IDENTITIFIER")
+
+
+@dataclass
+class Action(Generic[T, IDENTITIFIER]):
+    name: str
+    label: str
+    attributes: Dict[str, str] = field(default_factory=dict)
+    disabled: Callable[[T], bool] = field(default_factory=lambda: lambda row: False)
+    callback: Callable[[IDENTITIFIER], Any] = field(
+        default_factory=lambda: lambda id: None
+    )
+
+
+@dataclass
+class TableView(Generic[T, IDENTITIFIER]):
+
+    columns: List[Column]
+    actions: Dict[str, Action[T, IDENTITIFIER]]
+
+    id_getter: Callable[[T], IDENTITIFIER]
+
+    id_to_str: Callable[[IDENTITIFIER], str]
+    str_to_id: Callable[[str], IDENTITIFIER]
+
+    column_getter: Callable[[T, str], str]
+
+    def render(self, items: Sequence[T]) -> View:
+        return View(
+            children=[
+                CE(
+                    "table",
+                    [
+                        CE(
+                            "tr",
+                            [CE("th", [Text(column.label)]) for column in self.columns]
+                            + [
+                                CE("th", [Text(action.label)])
+                                for action in self.actions.values()
+                            ],
+                        ),
+                        *[
+                            CE(
+                                "tr",
+                                [
+                                    CE(
+                                        "td",
+                                        [Text(self.column_getter(item, column.name))],
+                                    )
+                                    for column in self.columns
+                                ]
+                                + [
+                                    CE(
+                                        "td",
+                                        [
+                                            Button(
+                                                [Text(action.label)],
+                                                attributes={
+                                                    "onclick": "execute_function('__action_name', __id)".replace(
+                                                        "__action_name", action.name
+                                                    ).replace(
+                                                        "__id",
+                                                        self.id_to_str(
+                                                            self.id_getter(item)
+                                                        ),
+                                                    ),
+                                                    **action.attributes,
+                                                },
+                                                disabled=action.disabled(item),
+                                            )
+                                        ],
+                                    )
+                                    for action in self.actions.values()
+                                ],
+                            )
+                            for item in items
+                        ],
+                    ],
+                )
+            ]
+        )
+
+
+AdoptableTable = TableView[Adoptable, int](
+    column_getter=lambda adoptable, column_name: str(getattr(adoptable, column_name)),
+    id_getter=lambda adoptable: adoptable.id,
+    id_to_str=str,
+    str_to_id=int,
+    columns=[
+        Column("id", "ID"),
+        Column("name", "Name"),
+        Column("age", "Age"),
+        Column("breed", "Breed"),
+        Column("description", "Description"),
+        Column("adoption_status", "Adoption Status"),
+    ],
+    actions={
+        "adopt": Action(
+            "adopt",
+            "Adopt",
+            attributes={"class": "btn btn-success"},
+            disabled=lambda adoptable: adoptable.adoption_status
+            != AdoptableStatus.AVAILABLE,
+            callback=adopt,
+        ),
+        "cancel_adoption": Action(
+            "cancel_adoption",
+            "Cancel Adoption",
+            attributes={"class": "btn btn-danger"},
+            disabled=lambda adoptable: adoptable.adoption_status
+            != AdoptableStatus.PENDING,
+            callback=cancel_adoption,
+        ),
+    },
 )
 
 app = Flask(__name__)
@@ -166,6 +264,24 @@ def list() -> Any:
                     CE(
                         "body",
                         [
+                            Script(
+                                """
+function execute_function(action_name, item_id) {
+    fetch("/", {
+        method: "POST",
+        body: JSON.stringify({action_name, item_id}),
+        headers: {
+            "Content-Type": "application/json"
+        }
+    }).then(function(response) {
+        return response.json();
+    }).then(function(data) {
+        console.log(data);
+        window.location.reload();
+    });
+}
+            """
+                            ),
                             CE(
                                 "div",
                                 [Text("Adoptables")],
@@ -173,7 +289,7 @@ def list() -> Any:
                             ),
                             CE(
                                 "div",
-                                [render_adoptables_table()],
+                                [AdoptableTable.render([*adoptables.values()])],
                                 attributes={"class": "container"},
                             ),
                         ],
@@ -210,12 +326,16 @@ def action() -> Any:
     if action_name is None:
         return {"success": False, "error": "No action_name provided"}
 
-    args = payload.get("args")
-    if args is None:
-        return {"success": False, "error": "No args provided"}
+    item_id = payload.get("item_id")
+    if item_id is None:
+        return {"success": False, "error": "No item_id provided"}
+
+    action = AdoptableTable.actions.get(action_name)
+    if action is None:
+        return {"success": False, "error": "Invalid action_name provided"}
 
     try:
-        result = action_manager.execute(action_name, args)
+        result = action.callback(item_id)
         return {"success": True, "result": result}
     except Exception as e:
         return {"success": False, "error": str(e)}
