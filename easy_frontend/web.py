@@ -1,13 +1,12 @@
-from dataclasses import dataclass
 import traceback
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from flask import Flask, make_response, request
 
-from easy_frontend.mapper import map_function
-from easy_frontend.renderer import CE, Script, Span, Text, View
-
-from enum import Enum
+from easy_frontend.actions import ActionsManager
+from easy_frontend.renderer import CE, Button, Script, Span, Text, View
 
 
 class AdoptableStatus(Enum):
@@ -26,31 +25,34 @@ class Adoptable:
     adoption_status: AdoptableStatus
 
 
-adoptables = [
-    Adoptable(1, "Fido", 3, "Pitbull", "A good dog", AdoptableStatus.AVAILABLE),
-    Adoptable(2, "Spot", 5, "Pitbull", "A good dog", AdoptableStatus.ADOPTED),
-    Adoptable(3, "Rover", 1, "Pitbull", "A good dog", AdoptableStatus.PENDING),
-]
+adoptables = {
+    1: Adoptable(1, "Fido", 3, "Pitbull", "A good dog", AdoptableStatus.AVAILABLE),
+    2: Adoptable(2, "Spot", 5, "Pitbull", "A good dog", AdoptableStatus.AVAILABLE),
+    3: Adoptable(3, "Rover", 1, "Pitbull", "A good dog", AdoptableStatus.AVAILABLE),
+}
+
 
 def render_adoptables_table() -> View:
     return View(
         children=[
-            Script("""
-                function execute_function(name, args) {
-                    fetch("/", {
-                        method: "POST",
-                        body: JSON.stringify(args),
-                        headers: {
-                            "Content-Type": "application/json"
-                        }
-                    }).then(function(response) {
-                        return response.json();
-                    }).then(function(data) {
-                        console.log(data);
-                        window.location.reload();
-                    });
-                }
-            """),
+            Script(
+                """
+function execute_function(action_name, args) {
+    fetch("/", {
+        method: "POST",
+        body: JSON.stringify({action_name, args}),
+        headers: {
+            "Content-Type": "application/json"
+        }
+    }).then(function(response) {
+        return response.json();
+    }).then(function(data) {
+        console.log(data);
+        window.location.reload();
+    });
+}
+            """
+            ),
             CE(
                 "table",
                 [
@@ -63,7 +65,7 @@ def render_adoptables_table() -> View:
                             CE("th", [Text("Breed")]),
                             CE("th", [Text("Description")]),
                             CE("th", [Text("Adoption Status")]),
-                            CE("th", [Text("Adopt")])
+                            CE("th", [Text("Adopt")]),
                         ],
                     ),
                     *[
@@ -76,17 +78,67 @@ def render_adoptables_table() -> View:
                                 CE("td", [Text(adoptable.breed)]),
                                 CE("td", [Text(adoptable.description)]),
                                 CE("td", [Text(adoptable.adoption_status.value)]),
-                                CE("td", [CE("button", [Text("Adopt")], attributes={"onclick": "execute_function('adopt', {id: __id})".replace("__id", str(adoptable.id))})]),
+                                CE(
+                                    "td",
+                                    [
+                                        Button(
+                                            [Text("Adopt")],
+                                            attributes={
+                                                "onclick": "execute_function('adopt', {id: __id})".replace(
+                                                    "__id", str(adoptable.id)
+                                                ),
+                                                "class": "btn btn-success",
+                                            },
+                                            disabled=adoptable.adoption_status
+                                            != AdoptableStatus.AVAILABLE,
+                                        ),
+                                        Button(
+                                            [Text("Cancel Adoption")],
+                                            attributes={
+                                                "onclick": "execute_function('cancel_adoption', {id: __id})".replace(
+                                                    "__id", str(adoptable.id)
+                                                ),
+                                                "class": "btn btn-danger",
+                                            },
+                                            disabled=adoptable.adoption_status
+                                            != AdoptableStatus.PENDING,
+                                        ),
+                                    ],
+                                ),
                             ],
                         )
-                        for adoptable in adoptables
+                        for adoptable in adoptables.values()
                     ],
                 ],
-            )
+            ),
         ]
     )
 
 
+def adopt(id: int) -> Any:
+    if id not in adoptables:
+        raise ValueError(f"Adoptable with id {id} does not exist")
+    adoptable = adoptables[id]
+    if adoptable.adoption_status != AdoptableStatus.AVAILABLE:
+        raise ValueError(f"Adoptable with id {id} is not available")
+    adoptable.adoption_status = AdoptableStatus.PENDING
+
+
+def cancel_adoption(id: int) -> Any:
+    if id not in adoptables:
+        raise ValueError(f"Adoptable with id {id} does not exist")
+    adoptable = adoptables[id]
+    if adoptable.adoption_status != AdoptableStatus.PENDING:
+        raise ValueError(f"Adoptable with id {id} is not pending")
+    adoptable.adoption_status = AdoptableStatus.AVAILABLE
+
+
+action_manager = ActionsManager(
+    {
+        "adopt": adopt,
+        "cancel_adoption": cancel_adoption,
+    }
+)
 
 app = Flask(__name__)
 
@@ -94,7 +146,41 @@ app = Flask(__name__)
 @app.route("/")
 def list() -> Any:
     try:
-        response = make_response(render_adoptables_table().render())
+        response = make_response(
+            CE(
+                "html",
+                [
+                    CE(
+                        "head",
+                        [
+                            CE(
+                                "link",
+                                # Bootstrap
+                                attributes={
+                                    "rel": "stylesheet",
+                                    "href": "https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css",
+                                },
+                            ),
+                        ],
+                    ),
+                    CE(
+                        "body",
+                        [
+                            CE(
+                                "div",
+                                [Text("Adoptables")],
+                                attributes={"class": "container"},
+                            ),
+                            CE(
+                                "div",
+                                [render_adoptables_table()],
+                                attributes={"class": "container"},
+                            ),
+                        ],
+                    ),
+                ],
+            ).render()
+        )
         response.headers["Refresh"] = "100"
         return response
     except Exception as e:
@@ -112,17 +198,24 @@ def list() -> Any:
         response.headers["Refresh"] = "100"
         return response
 
+
 @app.route("/", methods=["POST"])
 def action() -> Any:
     payload = request.json
-    
+
     if payload is None:
         return {"success": False, "error": "No payload provided"}
 
-    id = payload["id"]
+    action_name = payload.get("action_name")
+    if action_name is None:
+        return {"success": False, "error": "No action_name provided"}
+
+    args = payload.get("args")
+    if args is None:
+        return {"success": False, "error": "No args provided"}
+
     try:
-        adoptable = next(adoptable for adoptable in adoptables if adoptable.id == id)
-        adoptable.adoption_status = AdoptableStatus.ADOPTED
-        return {"success": True}
+        result = action_manager.execute(action_name, args)
+        return {"success": True, "result": result}
     except Exception as e:
         return {"success": False, "error": str(e)}

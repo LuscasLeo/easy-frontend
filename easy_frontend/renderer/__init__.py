@@ -51,6 +51,16 @@ class Renderable(Element, ABC):
 
 
 class Button(Element):
+    def __init__(
+        self,
+        children: List["Element"] = [],
+        attributes: Dict[str, str] = {},
+        disabled: bool = False,
+    ) -> None:
+        super().__init__(
+            children, {**attributes, **({"disabled": "disabled"} if disabled else {})}
+        )
+
     def render(self) -> str:
         return self.render_element("button")
 
@@ -69,8 +79,16 @@ class Text(Renderable):
 
 
 class Script(Element):
-    def __init__(self, script: Optional[str] = None, src: Optional[str] = None, attributes: Dict[str, str] = {}) -> None:
-        super().__init__([Text(script)] if script else [], {**attributes, **({"src": src} if src else {})})
+    def __init__(
+        self,
+        script: Optional[str] = None,
+        src: Optional[str] = None,
+        attributes: Dict[str, str] = {},
+    ) -> None:
+        super().__init__(
+            [Text(script)] if script else [],
+            {**attributes, **({"src": src} if src else {})},
+        )
 
     def render(self) -> str:
         return self.render_element("script")
@@ -88,6 +106,7 @@ class CustomElement(Element):
 
     def render(self) -> str:
         return self.render_element(self.tag_name)
+
 
 CE = CustomElement
 
