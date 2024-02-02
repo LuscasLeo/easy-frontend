@@ -1,5 +1,5 @@
 from typing import Any, Callable, Union
-from easy_frontend.renderer import CE, Element, Text, View
+from easy_frontend.renderer.basic_renderer import CE, Element, Text, View
 from inspect import signature
 
 

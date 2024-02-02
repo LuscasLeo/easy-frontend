@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from easy_frontend.renderer import CE, Button, CustomElement, Script, Span, Text, View
+from easy_frontend.renderer.basic_renderer import CE, Button, CustomElement, Script, Span, Text, View
 
 
 class TestGenerateHtmlFromView:
