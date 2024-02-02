@@ -8,6 +8,7 @@ from flask import Flask, make_response, request
 from easy_frontend.objects import Action, Column, TableView
 from easy_frontend.renderer.basic_renderer import CE, Span, Text, View
 
+
 ## Domain Model
 class AdoptableStatus(Enum):
     AVAILABLE = "AVAILABLE"

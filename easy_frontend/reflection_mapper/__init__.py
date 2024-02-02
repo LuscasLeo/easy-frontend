@@ -1,6 +1,7 @@
-from typing import Any, Callable, Union
-from easy_frontend.renderer.basic_renderer import CE, Element, Text, View
 from inspect import signature
+from typing import Any, Callable, Union
+
+from easy_frontend.renderer.basic_renderer import CE, Element, Text, View
 
 
 def describe_type(t: Any) -> str:
